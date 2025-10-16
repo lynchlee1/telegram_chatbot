@@ -117,5 +117,6 @@ def send_message(text):
     data = {"chat_id": CHAT_ID, "text": text}
     requests.post(url, data=data)
 
+# run the bot
 if __name__ == "__main__":
     run()

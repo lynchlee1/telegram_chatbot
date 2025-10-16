@@ -106,15 +106,15 @@ def run():
                     texts.append(textize(data, 'EB'))
                     texts_codes.append(data['rcept_no'])
     if texts:
-        result_text = f"{today_string}\n <b>금일 누적 발행내역입니다.</b>\n\n" + "\n".join(texts)
+        result_text = f"{today_string}\n일일 누적 발행내역입니다.\n\n" + "\n".join(texts)
     else:
-        result_text = f"{today_string}\n <b>금일 누적 발행내역입니다.</b>\n\n없음"
+        result_text = f"{today_string}\n일일 누적 발행내역입니다.\n\n없음"
     send_message(result_text)
     return None
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
+    data = {"chat_id": CHAT_ID, "text": text}
     requests.post(url, data=data)
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ name: DART Telegram Bot
 
 on:
   schedule:
-    - cron: "0 * * * *"   # every hour UTC
+    - cron: "*/5 * * * *"  # run every 5 minutes (UTC) for testing
   workflow_dispatch:
 
 jobs:

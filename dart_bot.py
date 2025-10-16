@@ -4,9 +4,11 @@ import os
 API_KEY = os.getenv("DART_API_KEY")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+from datetime import datetime, timezone, timedelta
 
-from datetime import datetime
-today = datetime.today()
+# Korea timezone (UTC+9)
+korea_tz = timezone(timedelta(hours=9))
+today = datetime.now(korea_tz)
 weekday_kr = {
     0: '(월)',
     1: '(화)',

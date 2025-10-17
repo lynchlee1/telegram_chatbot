@@ -4,11 +4,11 @@ import os
 API_KEY = os.getenv("DART_API_KEY")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
 from datetime import datetime, timezone, timedelta
 
 # Korea timezone (UTC+9)
 korea_tz = timezone(timedelta(hours=9))
-today = datetime.now(korea_tz)
 weekday_kr = {
     0: '(월)',
     1: '(화)',
@@ -18,9 +18,6 @@ weekday_kr = {
     5: '(토)',
     6: '(일)'
 }
-today_string = today.strftime('%Y-%m-%d %H:%M') + ' ' + weekday_kr[today.weekday()]
-today_yyyymmdd = today.strftime('%Y%m%d')
-
 def process_data(data):
     result = []
     if 'status' not in data: return False
@@ -73,44 +70,65 @@ def get_dart_report_details(corp_code, date_string):
 
 
 def run():
+    # Calculate current time each time function runs
+    today = datetime.now(korea_tz)
+    today_string = today.strftime('%Y-%m-%d %H:%M') + ' ' + weekday_kr[today.weekday()]
+    today_yyyymmdd = today.strftime('%Y%m%d')
+
+    info_string = ""
+    # Skip execution on weekends
+    if today.weekday() >= 5:  # 5 is Saturday, 6 is Sunday
+        return None
+    # Skip execution during non-business hours (9PM-6AM KST)
+    current_hour = today.hour
+    if current_hour >= 21 or current_hour < 6:
+        return None
+    if current_hour == 20:
+        info_string = "오늘의 마지막 안내입니다.\n"
+    
     reported_corp_codes = []
     page_no = 1
+    no_data = False
     while True:
         data = get_dart_reports(today_yyyymmdd, today_yyyymmdd, page_no)
+        if data['status'] != '000':
+            no_data = True
+            break
         for item in data['list']:
             reported_corp_codes.append(item['corp_code'])
         if data['total_count'] == 100: page_no += 1
         else: break
     
     texts = []
-    texts_codes = list()
-    for corp_code in reported_corp_codes:
-        bw_data, cb_data, eb_data = [], [], []
-        responce_bw, responce_cb, responce_eb = get_dart_report_details(corp_code, today_yyyymmdd)
+    if not no_data:
+        texts_codes = list()
+        for corp_code in reported_corp_codes:
+            bw_data, cb_data, eb_data = [], [], []
+            responce_bw, responce_cb, responce_eb = get_dart_report_details(corp_code, today_yyyymmdd)
 
-        bw_data = process_data(responce_bw)
-        cb_data = process_data(responce_cb)
-        eb_data = process_data(responce_eb)
+            bw_data = process_data(responce_bw)
+            cb_data = process_data(responce_cb)
+            eb_data = process_data(responce_eb)
 
-        if bw_data:
-            for data in bw_data:
-                if data['rcept_no'] not in texts_codes:
-                    texts.append(textize(data, 'BW'))
-                    texts_codes.append(data['rcept_no'])
-        if cb_data:
-            for data in cb_data:
-                if data['rcept_no'] not in texts_codes:
-                    texts.append(textize(data, 'CB'))
-                    texts_codes.append(data['rcept_no'])
-        if eb_data:
-            for data in eb_data:
-                if data['rcept_no'] not in texts_codes:
-                    texts.append(textize(data, 'EB'))
-                    texts_codes.append(data['rcept_no'])
+            if bw_data:
+                for data in bw_data:
+                    if data['rcept_no'] not in texts_codes:
+                        texts.append(textize(data, 'BW'))
+                        texts_codes.append(data['rcept_no'])
+            if cb_data:
+                for data in cb_data:
+                    if data['rcept_no'] not in texts_codes:
+                        texts.append(textize(data, 'CB'))
+                        texts_codes.append(data['rcept_no'])
+            if eb_data:
+                for data in eb_data:
+                    if data['rcept_no'] not in texts_codes:
+                        texts.append(textize(data, 'EB'))
+                        texts_codes.append(data['rcept_no'])
     if texts:
-        result_text = f"{today_string}\n일일 누적 발행내역입니다.\n\n" + "\n".join(texts)
+        result_text = f"{info_string}{today_string}\n일일 누적 발행내역입니다.\n\n" + "\n".join(reversed(texts))
     else:
-        result_text = f"{today_string}\n일일 누적 발행내역입니다.\n\n없음"
+        result_text = f"{info_string}{today_string}\n일일 누적 발행내역입니다.\n\n없음"
     send_message(result_text)
     return None
 

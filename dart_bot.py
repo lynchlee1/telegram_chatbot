@@ -155,7 +155,17 @@ def run():
     last_texts = load_last_texts()
     
     if texts and not texts_are_same(texts, last_texts):
-        result_text = f"{info_string}{today_string}\n일일 누적 발행내역입니다.\n\n" + "\n".join(texts)
+        new_texts = []
+        old_texts = []
+        
+        for text in texts:
+            if text not in last_texts:
+                new_texts.append(text)
+            else:
+                old_texts.append(text)
+        
+        ordered_texts = new_texts + old_texts        
+        result_text = f"{info_string}{today_string}\n일일 누적 발행내역입니다.\n\n" + "\n".join(ordered_texts)
         send_message(result_text)
         save_last_texts(texts)
     else:

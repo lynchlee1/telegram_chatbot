@@ -1,10 +1,16 @@
 import requests    
+import zipfile
+from io import BytesIO
 import os
 import json
+from bs4 import BeautifulSoup
 
 API_KEY = os.getenv("DART_API_KEY")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+if not API_KEY or not BOT_TOKEN or not CHAT_ID:
+    from configs import API_KEY, BOT_TOKEN, CHAT_ID
 
 # File to store the last texts list
 LAST_TEXTS_FILE = "last_texts.json"
@@ -107,13 +113,20 @@ def run():
     # Skip execution on weekends
     if today.weekday() >= 5:  # 5 is Saturday, 6 is Sunday
         return None
-    # current_hour = today.hour
+    current_hour = today.hour
+    if current_hour == 1:
+        try:
+            with open("requirements.txt", "w", encoding='utf-8') as reqf:
+                reqf.write("")
+        except Exception as e:
+            print(f"Error resetting requirements.txt: {e}")
     # if current_hour >= 21 or current_hour < 6:
     #     return None
     # if current_hour == 20:
     #     info_string = "오늘의 마지막 안내입니다.\n"
     
-    reported_corp_codes = []
+    reported_corp_codes = set()
+    reported_rcept_nos = dict()
     page_no = 1
     no_data = False
     while True:
@@ -122,10 +135,15 @@ def run():
             no_data = True
             break
         for item in data['list']:
-            reported_corp_codes.append(item['corp_code'])
+            filter_words = ['정정', '감자', '증자', '선택권', '처분', '자기', '자본', '양수도', '소송', '합병', '분할']
+            if any(word in item['report_nm'] for word in filter_words):
+                continue
+            reported_corp_codes.add(item['corp_code'])
+            reported_rcept_nos[item['rcept_no']] = [item.get('corp_name', ''), item.get('report_nm', '')]
         if data['total_count'] == 100: page_no += 1
         else: break
-    
+
+    reported_corp_codes = list(reported_corp_codes)
     texts = []
     if not no_data:
         texts_codes = list()
@@ -153,23 +171,72 @@ def run():
                         texts.append(textize(data, 'EB'))
                         texts_codes.append(data['rcept_no'])
     last_texts = load_last_texts()
+
+    source_download_url = "https://opendart.fss.or.kr/api/document.xml"
+    output_entries = []
+    for rcept_no, info in reported_rcept_nos.items():
+        corp_name, report_nm = info[0], info[1]
+        if '교환' in report_nm: report_type = 'EB'
+        elif '전환' in report_nm: report_type = 'CB'
+        elif '신주인수권부' in report_nm: report_type = 'BW'
+        else: report_type = ''
+        url = f"{source_download_url}?crtfc_key={API_KEY}&rcept_no={rcept_no}"
+        response = requests.get(url)
+        try:
+            with zipfile.ZipFile(BytesIO(response.content)) as zf:
+                file_list = zf.namelist()
+                for name in file_list:
+                    with zf.open(name) as f:
+                        data = f.read()
+                        try:
+                            text = data.decode('utf-8')
+                        except UnicodeDecodeError:
+                            try:
+                                text = data.decode('cp949')
+                            except UnicodeDecodeError:
+                                text = None
+                        if text is not None:
+                            soup = BeautifulSoup(text, 'html.parser')
+                            all_tables = soup.find_all('table')
+                            first_table = next((t for t in all_tables if '권면' in t.get_text()), None)
+                            if first_table is not None:
+                                target_value = None
+                                for tr in first_table.find_all('tr'):
+                                    row_text = tr.get_text(' ', strip=True)
+                                    if '사채의 권면(전자등록)총액' in row_text:
+                                        value_elem = tr.find(lambda tag: tag.name in ['te', 'td', 'th'] and (
+                                            tag.get('acode') == 'DNM_SUM' or tag.get('align', '').upper() == 'RIGHT'))
+                                        if value_elem is None:
+                                            cells = tr.find_all(['te', 'td', 'th'])
+                                            if cells:
+                                                value_elem = cells[-1]
+                                        if value_elem is not None:
+                                            target_value = value_elem.get_text(strip=True)
+                                        break
+                                if target_value is not None:
+                                    try:
+                                        amount_krw = float(str(target_value).replace(',', ''))
+                                        amount_eok = round(amount_krw / (10**8), 1)
+                                        formatted = f"- {corp_name} {report_type} {amount_eok}억 \n https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
+                                        output_entries.append((rcept_no, formatted))
+                                    except ValueError:
+                                        pass
+                        else:
+                            pass
+        except zipfile.BadZipFile:
+            pass
     
-    if texts and not texts_are_same(texts, last_texts):
-        new_texts = []
-        old_texts = []
-        
-        for text in texts:
-            if text not in last_texts:
-                new_texts.append(text)
-            else:
-                old_texts.append(text)
-        
-        ordered_texts = new_texts + old_texts        
-        result_text = f"{info_string}{today_string}\n일일 누적 발행내역입니다.\n\n" + "\n".join(ordered_texts)
-        send_message(result_text)
-        save_last_texts(texts)
-    else:
-        return None
+    if output_entries:
+        last_rcept_nos = load_last_texts()
+        if not isinstance(last_rcept_nos, list):
+            last_rcept_nos = []
+        new_entries = [(rcp, line) for (rcp, line) in output_entries if rcp not in last_rcept_nos]
+        if new_entries:
+            info_string = today_string + "\n일일 누적 발행내역입니다.\n\n"
+            final_text = info_string + "\n\n".join(line for _, line in new_entries)
+            print(final_text)
+            send_message(final_text)
+            save_last_texts(last_rcept_nos + [rcp for rcp, _ in new_entries])
     return None
 
 def send_message(text):

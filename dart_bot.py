@@ -1,9 +1,13 @@
 import requests    
 import os
+import json
 
 API_KEY = os.getenv("DART_API_KEY")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+# File to store the last texts list
+LAST_TEXTS_FILE = "last_texts.json"
 
 from datetime import datetime, timezone, timedelta
 
@@ -18,6 +22,30 @@ weekday_kr = {
     5: '(토)',
     6: '(일)'
 }
+def save_last_texts(texts):
+    try:
+        with open(LAST_TEXTS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(texts, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Error saving last texts: {e}")
+
+def load_last_texts():
+    try:
+        if os.path.exists(LAST_TEXTS_FILE):
+            with open(LAST_TEXTS_FILE, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                if not content:
+                    return []
+                return json.loads(content)
+    except Exception as e:
+        print(f"Error loading last texts: {e}")
+    return []
+
+def texts_are_same(texts1, texts2):
+    if not texts1 and not texts2: return True
+    if len(texts1) != len(texts2): return False
+    return texts1 == texts2
+
 def process_data(data):
     result = []
     if 'status' not in data: return False
@@ -79,12 +107,11 @@ def run():
     # Skip execution on weekends
     if today.weekday() >= 5:  # 5 is Saturday, 6 is Sunday
         return None
-    # Skip execution during non-business hours (9PM-6AM KST)
-    current_hour = today.hour
-    if current_hour >= 21 or current_hour < 6:
-        return None
-    if current_hour == 20:
-        info_string = "오늘의 마지막 안내입니다.\n"
+    # current_hour = today.hour
+    # if current_hour >= 21 or current_hour < 6:
+    #     return None
+    # if current_hour == 20:
+    #     info_string = "오늘의 마지막 안내입니다.\n"
     
     reported_corp_codes = []
     page_no = 1
@@ -125,11 +152,14 @@ def run():
                     if data['rcept_no'] not in texts_codes:
                         texts.append(textize(data, 'EB'))
                         texts_codes.append(data['rcept_no'])
-    if texts:
-        result_text = f"{info_string}{today_string}\n일일 누적 발행내역입니다.\n\n" + "\n".join(reversed(texts))
+    last_texts = load_last_texts()
+    
+    if texts and not texts_are_same(texts, last_texts):
+        result_text = f"{info_string}{today_string}\n일일 누적 발행내역입니다.\n\n" + "\n".join(texts)
+        send_message(result_text)
+        save_last_texts(texts)
     else:
-        result_text = f"{info_string}{today_string}\n일일 누적 발행내역입니다.\n\n없음"
-    send_message(result_text)
+        return None
     return None
 
 def send_message(text):
@@ -137,6 +167,5 @@ def send_message(text):
     data = {"chat_id": CHAT_ID, "text": text}
     requests.post(url, data=data)
 
-# run the bot
 if __name__ == "__main__":
     run()
